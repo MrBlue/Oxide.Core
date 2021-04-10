@@ -37,6 +37,6 @@ namespace Oxide.Core.RemoteConsole
             }
         }
 
-        internal string ToJSON() => JsonConvert.SerializeObject(this, Formatting.Indented);
+        public string ToJSON() => JsonConvert.SerializeObject(this, Formatting.Indented);
     }
 }

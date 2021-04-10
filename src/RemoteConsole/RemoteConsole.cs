@@ -22,6 +22,8 @@ namespace Oxide.Core.RemoteConsole
         private RconListener listener;
         private WebSocketServer server;
 
+        public static RemoteConsoleManager Manager = new RemoteConsoleManager();
+
         /// <summary>
         /// Initalizes the RCON server
         /// </summary>
@@ -131,9 +133,16 @@ namespace Oxide.Core.RemoteConsole
                 return;
             }
 
+            IRemoteClient client = WebSocketSharpClient.GetClient(connection);
+
+            if (Interface.CallHook("OnRconMessage", client, message) != null)
+            {
+                return;
+            }
+
             if (string.IsNullOrEmpty(message.Message))
             {
-                Interface.Oxide.LogError("[Rcon] Failed to process command, RemoteMessage.Text is not set");
+                Interface.Oxide.LogError("[Rcon] Failed to process command, RemoteMessage.Message is not set");
                 return;
             }
 
@@ -141,12 +150,45 @@ namespace Oxide.Core.RemoteConsole
             string command = fullCommand[0].ToLower();
             string[] args = fullCommand.Skip(1).ToArray();
 
-            if (Interface.CallHook("OnRconCommand", connection.UserEndPoint, command, args) != null)
+            if(Interface.CallHook("OnRconCommand", connection, command, args) != null)
             {
                 return;
             }
 
             covalence.Server.Command(command, args);
+        }
+
+        class WebSocketSharpClient : RemoteClient
+        {
+            private WebSocketContext connection;
+
+            public override IPAddress Address => connection.UserEndPoint.Address;
+            public override int Port => connection.UserEndPoint.Port;
+
+            public override void SendRaw(string message)
+            {
+                connection?.WebSocket?.Send(message);
+            }
+
+            public WebSocketSharpClient(WebSocketContext webSocketContext)
+            {
+                connection = webSocketContext;
+            }
+
+            public static IRemoteClient GetClient(WebSocketContext connection)
+            {
+                IRemoteClient client;
+
+                if (!Manager.TryGetClient(GetKey(connection), out client))
+                {
+                    client = new WebSocketSharpClient(connection);
+                    Manager.AddClient(client);
+                }
+
+                return client;
+            }
+
+            public static string GetKey(WebSocketContext connection) => $"{connection.UserEndPoint.Address}:{connection.UserEndPoint.Port}";
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -186,6 +228,7 @@ namespace Oxide.Core.RemoteConsole
         {
             private readonly RemoteConsole Parent;
             private IPAddress Address;
+            private int Port;
 
             public RconListener(RemoteConsole parent)
             {
@@ -197,6 +240,8 @@ namespace Oxide.Core.RemoteConsole
 
             protected override void OnClose(CloseEventArgs e)
             {
+                Manager.RemoveClient($"{Address}:{Port}");
+
                 string reason = string.IsNullOrEmpty(e.Reason) ? "Unknown" : e.Reason;
                 Interface.Oxide.LogInfo($"[Rcon] Connection from {Address} closed: {reason} ({e.Code})");
             }
@@ -208,6 +253,7 @@ namespace Oxide.Core.RemoteConsole
             protected override void OnOpen()
             {
                 Address = Context.UserEndPoint.Address;
+                Port = Context.UserEndPoint.Port;
                 Interface.Oxide.LogInfo($"[Rcon] New connection from {Address}");
             }
         }
